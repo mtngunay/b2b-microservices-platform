@@ -1,0 +1,100 @@
+# ConfigMap for B2B API Configuration
+# Requirements: 3.4, 8.2 - THE Orchestrator SHALL implement ConfigMaps for configuration management
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: b2b-api-config
+  namespace: b2b-system
+  labels:
+    app.kubernetes.io/name: b2b-api
+    app.kubernetes.io/component: config
+data:
+  # Application Settings
+  ASPNETCORE_ENVIRONMENT: "Production"
+  ASPNETCORE_URLS: "http://+:8080"
+  
+  # Logging Configuration
+  Serilog__MinimumLevel__Default: "Information"
+  Serilog__MinimumLevel__Override__Microsoft: "Warning"
+  Serilog__MinimumLevel__Override__System: "Warning"
+  Serilog__WriteTo__0__Name: "Console"
+  Serilog__WriteTo__0__Args__formatter: "Serilog.Formatting.Json.JsonFormatter, Serilog"
+  
+  # Database Configuration (non-sensitive)
+  WriteDatabase__CommandTimeout: "30"
+  WriteDatabase__EnableRetryOnFailure: "true"
+  WriteDatabase__MaxRetryCount: "3"
+  
+  ReadDatabase__DatabaseName: "B2BReadDb"
+  ReadDatabase__MaxConnectionPoolSize: "100"
+  
+  # Redis Configuration (non-sensitive)
+  Redis__InstanceName: "B2B_"
+  Redis__DefaultDatabase: "0"
+  Redis__ConnectTimeout: "5000"
+  Redis__SyncTimeout: "5000"
+  
+  # RabbitMQ Configuration (non-sensitive)
+  RabbitMQ__VirtualHost: "/"
+  RabbitMQ__PrefetchCount: "16"
+  RabbitMQ__RetryCount: "3"
+  RabbitMQ__RetryInterval: "5000"
+  
+  # JWT Configuration (non-sensitive)
+  Jwt__Issuer: "B2B-Platform"
+  Jwt__Audience: "B2B-API"
+  Jwt__AccessTokenExpirationMinutes: "60"
+  Jwt__RefreshTokenExpirationDays: "7"
+  
+  # Hangfire Configuration
+  Hangfire__WorkerCount: "5"
+  Hangfire__DashboardPath: "/hangfire"
+  
+  # Rate Limiting
+  RateLimiting__PermitLimit: "100"
+  RateLimiting__WindowSeconds: "60"
+  RateLimiting__QueueLimit: "10"
+  
+  # OpenTelemetry
+  OpenTelemetry__ServiceName: "B2B-API"
+  OpenTelemetry__JaegerEndpoint: "http://jaeger-agent.b2b-observability.svc.cluster.local:6831"
+  
+  # Elasticsearch Configuration for Logging
+  Elasticsearch__Uri: "http://elasticsearch-client.b2b-observability.svc.cluster.local:9200"
+  Elasticsearch__IndexFormat: "b2b-api-logs-{0:yyyy.MM.dd}"
+  Elasticsearch__Username: ""
+  Elasticsearch__Password: ""
+
+---
+# ConfigMap for B2B Worker Configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: b2b-worker-config
+  namespace: b2b-system
+  labels:
+    app.kubernetes.io/name: b2b-worker
+    app.kubernetes.io/component: config
+data:
+  ASPNETCORE_ENVIRONMENT: "Production"
+  
+  # Hangfire Worker Settings
+  Hangfire__WorkerCount: "10"
+  Hangfire__Queues__0: "default"
+  Hangfire__Queues__1: "outbox"
+  Hangfire__Queues__2: "notifications"
+  
+  # Outbox Processor Settings
+  OutboxProcessor__BatchSize: "100"
+  OutboxProcessor__PollingIntervalSeconds: "5"
+  OutboxProcessor__MaxRetryCount: "5"
+  
+  # MongoDB Configuration
+  MongoDB__ConnectionString: "mongodb://admin:YourMongoPassword@mongodb-svc.b2b-data.svc.cluster.local:27017/B2B?authSource=admin"
+  MongoDB__DatabaseName: "B2B"
+  
+  # Logging
+  Serilog__MinimumLevel__Default: "Information"
+  Serilog__WriteTo__0__Name: "Console"
+  Serilog__WriteTo__0__Args__formatter: "Serilog.Formatting.Json.JsonFormatter, Serilog"

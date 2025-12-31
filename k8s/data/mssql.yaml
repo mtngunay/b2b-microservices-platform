@@ -1,0 +1,120 @@
+# MSSQL Server StatefulSet
+# Requirements: 4.1, 10.1 - THE Write_Database SHALL use MSSQL Server with EF Core
+
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mssql
+  namespace: b2b-data
+  labels:
+    app.kubernetes.io/name: mssql
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: b2b-platform
+spec:
+  serviceName: mssql
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mssql
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: mssql
+        app.kubernetes.io/component: database
+    spec:
+      securityContext:
+        fsGroup: 10001
+      containers:
+        - name: mssql
+          image: mcr.microsoft.com/mssql/server:2022-latest
+          ports:
+            - name: mssql
+              containerPort: 1433
+              protocol: TCP
+          env:
+            - name: ACCEPT_EULA
+              value: "Y"
+            - name: MSSQL_PID
+              value: "Developer"
+            - name: SA_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mssql-secrets
+                  key: SA_PASSWORD
+          resources:
+            requests:
+              memory: "2Gi"
+              cpu: "500m"
+            limits:
+              memory: "4Gi"
+              cpu: "2000m"
+          livenessProbe:
+            tcpSocket:
+              port: mssql
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            tcpSocket:
+              port: mssql
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          volumeMounts:
+            - name: mssql-data
+              mountPath: /var/opt/mssql
+  volumeClaimTemplates:
+    - metadata:
+        name: mssql-data
+        labels:
+          app.kubernetes.io/name: mssql
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 50Gi
+        storageClassName: hostpath
+
+---
+# MSSQL Headless Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: mssql
+  namespace: b2b-data
+  labels:
+    app.kubernetes.io/name: mssql
+    app.kubernetes.io/component: database
+spec:
+  type: ClusterIP
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: mssql
+  ports:
+    - name: mssql
+      port: 1433
+      targetPort: mssql
+      protocol: TCP
+
+---
+# MSSQL ClusterIP Service (for external access within cluster)
+apiVersion: v1
+kind: Service
+metadata:
+  name: mssql-svc
+  namespace: b2b-data
+  labels:
+    app.kubernetes.io/name: mssql
+    app.kubernetes.io/component: database
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: mssql
+  ports:
+    - name: mssql
+      port: 1433
+      targetPort: mssql
+      protocol: TCP

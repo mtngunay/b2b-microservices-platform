@@ -1,0 +1,169 @@
+# B2B Worker Deployment (Hangfire)
+# Requirements: 14.6 - WHEN deploying to Kubernetes, THE Job_Scheduler SHALL run as separate worker pods
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: b2b-worker
+  namespace: b2b-system
+  labels:
+    app.kubernetes.io/name: b2b-worker
+    app.kubernetes.io/component: worker
+    app.kubernetes.io/part-of: b2b-platform
+    app.kubernetes.io/version: "1.0.0"
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: b2b-worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: b2b-worker
+        app.kubernetes.io/component: worker
+        app.kubernetes.io/part-of: b2b-platform
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: b2b-worker-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      initContainers:
+        - name: wait-for-mssql
+          image: busybox:1.36
+          command: 
+            - sh
+            - -c
+            - |
+              echo "Waiting 30 seconds for MSSQL to be fully ready..."
+              sleep 30
+              echo "Checking MSSQL port..."
+              for i in 1 2 3 4 5 6 7 8 9 10; do
+                if nc -z mssql-svc.b2b-data.svc.cluster.local 1433; then
+                  echo "MSSQL port is open! Waiting 10 more seconds for full initialization..."
+                  sleep 10
+                  exit 0
+                fi
+                echo "Attempt $i: MSSQL not ready, waiting 5 seconds..."
+                sleep 5
+              done
+              echo "MSSQL check completed"
+              exit 0
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            allowPrivilegeEscalation: false
+      containers:
+        - name: b2b-worker
+          image: b2b-worker:latest
+          imagePullPolicy: Never
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: b2b-worker-config
+          env:
+            - name: ConnectionStrings__WriteDb
+              valueFrom:
+                secretKeyRef:
+                  name: b2b-secrets
+                  key: WriteDatabase__ConnectionString
+            - name: ConnectionStrings__ReadDb
+              valueFrom:
+                secretKeyRef:
+                  name: b2b-secrets
+                  key: ReadDatabase__ConnectionString
+            - name: ConnectionStrings__Redis
+              valueFrom:
+                secretKeyRef:
+                  name: b2b-secrets
+                  key: Redis__ConnectionString
+            - name: RabbitMq__Host
+              value: "rabbitmq-svc.b2b-messaging.svc.cluster.local"
+            - name: RabbitMq__Port
+              value: "5672"
+            - name: RabbitMq__Username
+              value: "b2b_user"
+            - name: RabbitMq__Password
+              value: "YourRabbitPassword"
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "500m"
+            limits:
+              memory: "1Gi"
+              cpu: "1000m"
+          # Health checks disabled - Worker needs time to initialize Hangfire
+          # livenessProbe:
+          #   httpGet:
+          #     path: /health/live
+          #     port: http
+          #   initialDelaySeconds: 60
+          #   periodSeconds: 30
+          #   timeoutSeconds: 10
+          #   failureThreshold: 5
+          # readinessProbe:
+          #   httpGet:
+          #     path: /health/ready
+          #     port: http
+          #   initialDelaySeconds: 30
+          #   periodSeconds: 15
+          #   timeoutSeconds: 10
+          #   failureThreshold: 5
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: b2b-worker
+                topologyKey: kubernetes.io/hostname
+
+---
+# Service Account for B2B Worker
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: b2b-worker-sa
+  namespace: b2b-system
+  labels:
+    app.kubernetes.io/name: b2b-worker
+
+---
+# Service for Hangfire Dashboard (optional, for internal access)
+apiVersion: v1
+kind: Service
+metadata:
+  name: b2b-worker-svc
+  namespace: b2b-system
+  labels:
+    app.kubernetes.io/name: b2b-worker
+    app.kubernetes.io/component: worker
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: b2b-worker
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP

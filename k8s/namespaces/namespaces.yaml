@@ -1,0 +1,46 @@
+# Kubernetes Namespace Definitions for B2B Platform
+# Requirements: 3.1 - THE Orchestrator SHALL deploy the API_Service using Deployment manifests
+
+---
+# Core application namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: b2b-system
+  labels:
+    app.kubernetes.io/name: b2b-platform
+    app.kubernetes.io/component: system
+    environment: production
+
+---
+# Database namespace (MSSQL, MongoDB, Redis)
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: b2b-data
+  labels:
+    app.kubernetes.io/name: b2b-platform
+    app.kubernetes.io/component: data
+    environment: production
+
+---
+# Messaging namespace (RabbitMQ)
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: b2b-messaging
+  labels:
+    app.kubernetes.io/name: b2b-platform
+    app.kubernetes.io/component: messaging
+    environment: production
+
+---
+# Observability namespace (ELK, Prometheus, Grafana, Jaeger)
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: b2b-observability
+  labels:
+    app.kubernetes.io/name: b2b-platform
+    app.kubernetes.io/component: observability
+    environment: production

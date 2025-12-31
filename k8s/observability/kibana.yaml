@@ -1,0 +1,124 @@
+# Kibana Deployment for B2B Platform
+# Requirements: 15.5 - THE Orchestrator SHALL deploy Kibana for log visualization and dashboards
+
+---
+# Kibana ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kibana-config
+  namespace: b2b-observability
+  labels:
+    app.kubernetes.io/name: kibana
+    app.kubernetes.io/component: logging
+data:
+  kibana.yml: |
+    server.name: kibana
+    server.host: "0.0.0.0"
+    server.port: 5601
+    server.publicBaseUrl: "http://localhost:5601"
+    elasticsearch.hosts: ["http://elasticsearch-client:9200"]
+    monitoring.ui.container.elasticsearch.enabled: true
+    
+    # Disable security
+    xpack.security.enabled: false
+    
+    # Disable Fleet/Integrations (requires security)
+    xpack.fleet.agents.enabled: false
+    
+    # Encryption keys (required even with security disabled)
+    xpack.encryptedSavedObjects.encryptionKey: "b2b-platform-kibana-encryption-key-32ch"
+    xpack.reporting.encryptionKey: "b2b-platform-kibana-reporting-key-32ch"
+    
+    # Disable telemetry prompts
+    telemetry.enabled: false
+    telemetry.optIn: false
+    
+    # Skip welcome screen
+    newsfeed.enabled: false
+    
+    # Logging
+    logging.root.level: info
+
+---
+# Kibana Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: kibana
+  namespace: b2b-observability
+  labels:
+    app.kubernetes.io/name: kibana
+    app.kubernetes.io/component: logging
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: kibana
+  ports:
+    - name: http
+      port: 5601
+      targetPort: 5601
+
+---
+# Kibana Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kibana
+  namespace: b2b-observability
+  labels:
+    app.kubernetes.io/name: kibana
+    app.kubernetes.io/component: logging
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kibana
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kibana
+        app.kubernetes.io/component: logging
+    spec:
+      containers:
+        - name: kibana
+          image: docker.elastic.co/kibana/kibana:8.11.0
+          ports:
+            - containerPort: 5601
+              name: http
+          env:
+            - name: NODE_OPTIONS
+              value: "--max-old-space-size=1024"
+            - name: XPACK_SECURITY_ENABLED
+              value: "false"
+            - name: XPACK_FLEET_AGENTS_ENABLED
+              value: "false"
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "1Gi"
+              cpu: "500m"
+          volumeMounts:
+            - name: config
+              mountPath: /usr/share/kibana/config/kibana.yml
+              subPath: kibana.yml
+          readinessProbe:
+            httpGet:
+              path: /api/status
+              port: 5601
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /api/status
+              port: 5601
+            initialDelaySeconds: 120
+            periodSeconds: 20
+            timeoutSeconds: 5
+      volumes:
+        - name: config
+          configMap:
+            name: kibana-config

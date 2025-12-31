@@ -1,0 +1,212 @@
+# Logstash Deployment for B2B Platform
+# Requirements: 15.4 - THE Orchestrator SHALL deploy Logstash for log processing and transformation
+
+---
+# Logstash ConfigMap for pipeline configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: logstash-config
+  namespace: b2b-observability
+  labels:
+    app.kubernetes.io/name: logstash
+    app.kubernetes.io/component: logging
+data:
+  logstash.yml: |
+    http.host: "0.0.0.0"
+    path.config: /usr/share/logstash/pipeline
+    xpack.monitoring.enabled: true
+    xpack.monitoring.elasticsearch.hosts: ["http://elasticsearch-client:9200"]
+  
+  pipelines.yml: |
+    - pipeline.id: b2b-logs
+      path.config: "/usr/share/logstash/pipeline/b2b-logs.conf"
+      pipeline.workers: 2
+
+---
+# Logstash Pipeline ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: logstash-pipeline
+  namespace: b2b-observability
+  labels:
+    app.kubernetes.io/name: logstash
+    app.kubernetes.io/component: logging
+data:
+  b2b-logs.conf: |
+    input {
+      beats {
+        port => 5044
+      }
+      tcp {
+        port => 5000
+        codec => json_lines
+      }
+      http {
+        port => 8080
+        codec => json
+      }
+    }
+
+    filter {
+      # Parse JSON logs from .NET applications
+      if [message] =~ /^\{/ {
+        json {
+          source => "message"
+          target => "parsed"
+        }
+        
+        # Extract common fields
+        if [parsed][CorrelationId] {
+          mutate {
+            add_field => { "correlation_id" => "%{[parsed][CorrelationId]}" }
+          }
+        }
+        
+        if [parsed][TenantId] {
+          mutate {
+            add_field => { "tenant_id" => "%{[parsed][TenantId]}" }
+          }
+        }
+        
+        if [parsed][Level] {
+          mutate {
+            add_field => { "log_level" => "%{[parsed][Level]}" }
+          }
+        }
+        
+        if [parsed][SourceContext] {
+          mutate {
+            add_field => { "source_context" => "%{[parsed][SourceContext]}" }
+          }
+        }
+      }
+      
+      # Add timestamp if not present
+      if ![timestamp] {
+        date {
+          match => ["@timestamp", "ISO8601"]
+          target => "timestamp"
+        }
+      }
+      
+      # Add environment tag
+      mutate {
+        add_field => { "environment" => "production" }
+        add_tag => ["b2b-platform"]
+      }
+      
+      # Remove unnecessary fields
+      mutate {
+        remove_field => ["host", "agent", "ecs"]
+      }
+    }
+
+    output {
+      elasticsearch {
+        hosts => ["http://elasticsearch-client:9200"]
+        index => "b2b-logs-%{+YYYY.MM.dd}"
+        template_name => "b2b-logs"
+        template_overwrite => true
+      }
+      
+      # Debug output (disable in production)
+      # stdout { codec => rubydebug }
+    }
+
+---
+# Logstash Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: logstash
+  namespace: b2b-observability
+  labels:
+    app.kubernetes.io/name: logstash
+    app.kubernetes.io/component: logging
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: logstash
+  ports:
+    - name: beats
+      port: 5044
+      targetPort: 5044
+    - name: tcp
+      port: 5000
+      targetPort: 5000
+    - name: http
+      port: 8080
+      targetPort: 8080
+
+---
+# Logstash Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: logstash
+  namespace: b2b-observability
+  labels:
+    app.kubernetes.io/name: logstash
+    app.kubernetes.io/component: logging
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: logstash
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: logstash
+        app.kubernetes.io/component: logging
+    spec:
+      containers:
+        - name: logstash
+          image: docker.elastic.co/logstash/logstash:8.11.0
+          ports:
+            - containerPort: 5044
+              name: beats
+            - containerPort: 5000
+              name: tcp
+            - containerPort: 8080
+              name: http
+          env:
+            - name: LS_JAVA_OPTS
+              value: "-Xms256m -Xmx512m"
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "1Gi"
+              cpu: "500m"
+          volumeMounts:
+            - name: config
+              mountPath: /usr/share/logstash/config/logstash.yml
+              subPath: logstash.yml
+            - name: config
+              mountPath: /usr/share/logstash/config/pipelines.yml
+              subPath: pipelines.yml
+            - name: pipeline
+              mountPath: /usr/share/logstash/pipeline/b2b-logs.conf
+              subPath: b2b-logs.conf
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 9600
+            initialDelaySeconds: 60
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 9600
+            initialDelaySeconds: 120
+            periodSeconds: 20
+      volumes:
+        - name: config
+          configMap:
+            name: logstash-config
+        - name: pipeline
+          configMap:
+            name: logstash-pipeline

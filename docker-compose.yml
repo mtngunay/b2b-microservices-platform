@@ -1,0 +1,179 @@
+version: '3.8'
+
+services:
+  # ===========================================
+  # Application Services
+  # ===========================================
+  
+  b2b-api:
+    build:
+      context: .
+      dockerfile: src/B2B.API/Dockerfile
+    container_name: b2b-api
+    ports:
+      - "5000:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ConnectionStrings__WriteDb=Server=mssql;Database=B2B;User Id=sa;Password=B2B_Strong_Password_123!;TrustServerCertificate=True
+      - ConnectionStrings__ReadDb=mongodb://mongodb:27017/b2b_read
+      - ConnectionStrings__Redis=redis:6379
+      - ConnectionStrings__RabbitMq=amqp://guest:guest@rabbitmq:5672
+      - Jwt__Secret=YourSuperSecretKeyForJwtTokenGeneration_MustBeAtLeast32Characters!
+      - Jwt__Issuer=B2B.API
+      - Jwt__Audience=B2B.Client
+      - Jwt__ExpirationMinutes=60
+    depends_on:
+      mssql:
+        condition: service_healthy
+      mongodb:
+        condition: service_started
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - b2b-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  b2b-worker:
+    build:
+      context: .
+      dockerfile: src/B2B.Worker/Dockerfile
+    container_name: b2b-worker
+    ports:
+      - "5001:8081"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ConnectionStrings__WriteDb=Server=mssql;Database=B2B;User Id=sa;Password=B2B_Strong_Password_123!;TrustServerCertificate=True
+      - ConnectionStrings__ReadDb=mongodb://mongodb:27017/b2b_read
+      - ConnectionStrings__Redis=redis:6379
+      - ConnectionStrings__RabbitMq=amqp://guest:guest@rabbitmq:5672
+      - Hangfire__WorkerCount=5
+    depends_on:
+      mssql:
+        condition: service_healthy
+      mongodb:
+        condition: service_started
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - b2b-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # ===========================================
+  # Database Services
+  # ===========================================
+  
+  mssql:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: b2b-mssql
+    ports:
+      - "1433:1433"
+    environment:
+      - ACCEPT_EULA=Y
+      - MSSQL_SA_PASSWORD=B2B_Strong_Password_123!
+      - MSSQL_PID=Developer
+    volumes:
+      - mssql-data:/var/opt/mssql
+    networks:
+      - b2b-network
+    restart: unless-stopped
+    healthcheck:
+      test: /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "B2B_Strong_Password_123!" -C -Q "SELECT 1" || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  mongodb:
+    image: mongo:7.0
+    container_name: b2b-mongodb
+    ports:
+      - "27017:27017"
+    environment:
+      - MONGO_INITDB_DATABASE=b2b_read
+    volumes:
+      - mongodb-data:/data/db
+    networks:
+      - b2b-network
+    restart: unless-stopped
+
+  # ===========================================
+  # Cache and Messaging Services
+  # ===========================================
+  
+  redis:
+    image: redis:7.4-alpine
+    container_name: b2b-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    networks:
+      - b2b-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: b2b-rabbitmq
+    ports:
+      - "5672:5672"   # AMQP
+      - "15672:15672" # Management UI
+    environment:
+      - RABBITMQ_DEFAULT_USER=guest
+      - RABBITMQ_DEFAULT_PASS=guest
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    networks:
+      - b2b-network
+    restart: unless-stopped
+    healthcheck:
+      test: rabbitmq-diagnostics -q ping
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+# ===========================================
+# Networks
+# ===========================================
+
+networks:
+  b2b-network:
+    driver: bridge
+    name: b2b-network
+
+# ===========================================
+# Volumes
+# ===========================================
+
+volumes:
+  mssql-data:
+    name: b2b-mssql-data
+  mongodb-data:
+    name: b2b-mongodb-data
+  redis-data:
+    name: b2b-redis-data
+  rabbitmq-data:
+    name: b2b-rabbitmq-data

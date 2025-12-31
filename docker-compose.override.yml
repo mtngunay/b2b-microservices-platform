@@ -1,0 +1,72 @@
+version: '3.8'
+
+# Development overrides for docker-compose.yml
+# This file is automatically loaded when running docker-compose up
+
+services:
+  b2b-api:
+    build:
+      context: .
+      dockerfile: src/B2B.API/Dockerfile
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - Logging__LogLevel__Default=Debug
+      - Logging__LogLevel__Microsoft.AspNetCore=Information
+    volumes:
+      # Mount for hot reload during development (optional)
+      # - ./src/B2B.API:/app:ro
+    ports:
+      - "5000:8080"
+
+  b2b-worker:
+    build:
+      context: .
+      dockerfile: src/B2B.Worker/Dockerfile
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - Logging__LogLevel__Default=Debug
+      - Hangfire__WorkerCount=2
+    ports:
+      - "5001:8081"
+
+  # Development tools - Uncomment to enable observability stack
+  
+  # elasticsearch:
+  #   image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+  #   container_name: b2b-elasticsearch
+  #   environment:
+  #     - discovery.type=single-node
+  #     - xpack.security.enabled=false
+  #     - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+  #   ports:
+  #     - "9200:9200"
+  #   volumes:
+  #     - elasticsearch-data:/usr/share/elasticsearch/data
+  #   networks:
+  #     - b2b-network
+
+  # kibana:
+  #   image: docker.elastic.co/kibana/kibana:8.11.0
+  #   container_name: b2b-kibana
+  #   environment:
+  #     - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+  #   ports:
+  #     - "5601:5601"
+  #   depends_on:
+  #     - elasticsearch
+  #   networks:
+  #     - b2b-network
+
+  # jaeger:
+  #   image: jaegertracing/all-in-one:1.52
+  #   container_name: b2b-jaeger
+  #   ports:
+  #     - "16686:16686"  # Jaeger UI
+  #     - "6831:6831/udp"  # Jaeger agent
+  #     - "14268:14268"  # Jaeger collector
+  #   networks:
+  #     - b2b-network
+
+# volumes:
+#   elasticsearch-data:
+#     name: b2b-elasticsearch-data

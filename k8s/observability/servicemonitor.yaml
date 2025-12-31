@@ -1,0 +1,83 @@
+# ServiceMonitor for B2B API
+# Requirements: 18.4 - THE Orchestrator SHALL deploy Prometheus for metrics collection
+# Note: ServiceMonitor is a Prometheus Operator CRD. If not using Prometheus Operator,
+# the scrape configs in prometheus.yaml handle service discovery.
+
+---
+# ServiceMonitor for B2B API (requires Prometheus Operator)
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: b2b-api-monitor
+  namespace: b2b-observability
+  labels:
+    app.kubernetes.io/name: b2b-api
+    app.kubernetes.io/component: monitoring
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: b2b-api
+  namespaceSelector:
+    matchNames:
+      - b2b-system
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s
+      scrapeTimeout: 10s
+      honorLabels: true
+      relabelings:
+        - sourceLabels: [__meta_kubernetes_pod_name]
+          targetLabel: pod
+        - sourceLabels: [__meta_kubernetes_namespace]
+          targetLabel: namespace
+
+---
+# ServiceMonitor for B2B Worker (requires Prometheus Operator)
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: b2b-worker-monitor
+  namespace: b2b-observability
+  labels:
+    app.kubernetes.io/name: b2b-worker
+    app.kubernetes.io/component: monitoring
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: b2b-worker
+  namespaceSelector:
+    matchNames:
+      - b2b-system
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+      scrapeTimeout: 10s
+
+---
+# PodMonitor for all pods with prometheus annotations (requires Prometheus Operator)
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: b2b-pods-monitor
+  namespace: b2b-observability
+  labels:
+    app.kubernetes.io/name: b2b-platform
+    app.kubernetes.io/component: monitoring
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/part-of: b2b-platform
+  namespaceSelector:
+    matchNames:
+      - b2b-system
+      - b2b-data
+      - b2b-messaging
+  podMetricsEndpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s

@@ -1,0 +1,60 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# IDE and Editor
+.vs
+.vscode
+.idea
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Build outputs
+**/bin
+**/obj
+**/out
+**/publish
+
+# NuGet
+**/packages
+*.nupkg
+
+# Test results
+**/TestResults
+**/coverage
+
+# Documentation
+docs
+*.md
+!README.md
+
+# Docker
+**/Dockerfile*
+docker-compose*.yml
+.docker
+
+# Kiro specs
+.kiro
+
+# Logs
+*.log
+logs
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Environment files (keep for reference but don't include secrets)
+*.env.local
+*.env.*.local
+
+# Test projects (optional - uncomment if you don't want tests in container)
+# tests

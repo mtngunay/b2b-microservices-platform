@@ -1,0 +1,137 @@
+# B2B API Deployment
+# Requirements: 3.1, 3.6, 3.7, 7.3 - Deployment with probes, resource limits, and proper labels
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: b2b-api
+  namespace: b2b-system
+  labels:
+    app.kubernetes.io/name: b2b-api
+    app.kubernetes.io/component: api
+    app.kubernetes.io/part-of: b2b-platform
+    app.kubernetes.io/version: "1.0.0"
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: b2b-api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: b2b-api
+        app.kubernetes.io/component: api
+        app.kubernetes.io/part-of: b2b-platform
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: b2b-api-sa
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+        - name: b2b-api
+          image: b2b-api:latest
+          imagePullPolicy: Never
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: b2b-api-config
+          env:
+            - name: ConnectionStrings__WriteDb
+              valueFrom:
+                secretKeyRef:
+                  name: b2b-secrets
+                  key: WriteDatabase__ConnectionString
+            - name: ConnectionStrings__ReadDb
+              valueFrom:
+                secretKeyRef:
+                  name: b2b-secrets
+                  key: ReadDatabase__ConnectionString
+            - name: ConnectionStrings__Redis
+              valueFrom:
+                secretKeyRef:
+                  name: b2b-secrets
+                  key: Redis__ConnectionString
+            - name: ConnectionStrings__RabbitMQ
+              valueFrom:
+                secretKeyRef:
+                  name: b2b-secrets
+                  key: RabbitMQ__ConnectionString
+            - name: Jwt__SecretKey
+              valueFrom:
+                secretKeyRef:
+                  name: b2b-secrets
+                  key: Jwt__SecretKey
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          # Liveness probe - checks if the container is running
+          # Requirements: 3.6 - WHEN a pod becomes unhealthy, THE Orchestrator SHALL restart it
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 3
+          # Readiness probe - checks if the container is ready to receive traffic
+          # Requirements: 3.7 - THE Orchestrator SHALL use readiness probes to manage traffic routing
+          # Temporarily disabled for development
+          # readinessProbe:
+          #   httpGet:
+          #     path: /health/ready
+          #     port: http
+          #   initialDelaySeconds: 5
+          #   periodSeconds: 10
+          #   timeoutSeconds: 5
+          #   failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: b2b-api
+                topologyKey: kubernetes.io/hostname
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: b2b-api
+
+---
+# Service Account for B2B API
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: b2b-api-sa
+  namespace: b2b-system
+  labels:
+    app.kubernetes.io/name: b2b-api

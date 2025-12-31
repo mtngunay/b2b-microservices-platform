@@ -1,0 +1,263 @@
+# Redis StatefulSet (3 replicas with Sentinel)
+# Requirements: 4.1, 4.5 - THE Cache_Layer SHALL be deployed as a Kubernetes StatefulSet
+
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: redis
+  namespace: b2b-data
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/component: cache
+    app.kubernetes.io/part-of: b2b-platform
+spec:
+  serviceName: redis
+  replicas: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: redis
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: redis
+        app.kubernetes.io/component: cache
+    spec:
+      securityContext:
+        fsGroup: 1000
+        runAsUser: 1000
+        runAsNonRoot: true
+      initContainers:
+        - name: init-redis
+          image: redis:7.2-alpine
+          command:
+            - sh
+            - -c
+            - |
+              cp /tmp/redis/redis.conf /etc/redis/redis.conf
+              # Replace password placeholder with actual password
+              sed -i "s/\${REDIS_PASSWORD}/$REDIS_PASSWORD/g" /etc/redis/redis.conf
+              echo "replica-announce-ip $(hostname -f)" >> /etc/redis/redis.conf
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: redis-secrets
+                  key: REDIS_PASSWORD
+          securityContext:
+            runAsUser: 1000
+            runAsNonRoot: true
+          volumeMounts:
+            - name: redis-config
+              mountPath: /tmp/redis
+            - name: config
+              mountPath: /etc/redis
+      containers:
+        - name: redis
+          image: redis:7.2-alpine
+          ports:
+            - name: redis
+              containerPort: 6379
+              protocol: TCP
+          command:
+            - redis-server
+            - /etc/redis/redis.conf
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: redis-secrets
+                  key: REDIS_PASSWORD
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          livenessProbe:
+            exec:
+              command:
+                - redis-cli
+                - -a
+                - $(REDIS_PASSWORD)
+                - ping
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            exec:
+              command:
+                - redis-cli
+                - -a
+                - $(REDIS_PASSWORD)
+                - ping
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: redis-data
+              mountPath: /data
+            - name: config
+              mountPath: /etc/redis
+      volumes:
+        - name: redis-config
+          configMap:
+            name: redis-config
+        - name: config
+          emptyDir: {}
+  volumeClaimTemplates:
+    - metadata:
+        name: redis-data
+        labels:
+          app.kubernetes.io/name: redis
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 10Gi
+        storageClassName: hostpath
+
+---
+# Redis ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: redis-config
+  namespace: b2b-data
+  labels:
+    app.kubernetes.io/name: redis
+data:
+  redis.conf: |
+    # Redis Configuration for B2B Platform
+    bind 0.0.0.0
+    port 6379
+    
+    # Authentication
+    requirepass ${REDIS_PASSWORD}
+    masterauth ${REDIS_PASSWORD}
+    
+    # Persistence (AOF for durability)
+    appendonly yes
+    appendfsync everysec
+    auto-aof-rewrite-percentage 100
+    auto-aof-rewrite-min-size 64mb
+    
+    # ============================================
+    # MEMORY MANAGEMENT & LRU EVICTION
+    # ============================================
+    # Maximum memory limit (400MB per instance)
+    maxmemory 400mb
+    
+    # LRU Eviction Policy Options:
+    # - volatile-lru: Evict keys with TTL using LRU
+    # - allkeys-lru: Evict any key using LRU (RECOMMENDED for cache)
+    # - volatile-lfu: Evict keys with TTL using LFU (least frequently used)
+    # - allkeys-lfu: Evict any key using LFU
+    # - volatile-random: Random eviction for keys with TTL
+    # - allkeys-random: Random eviction for any key
+    # - volatile-ttl: Evict keys with shortest TTL first
+    # - noeviction: Return error when memory limit reached
+    maxmemory-policy allkeys-lfu
+    
+    # LFU tuning (for allkeys-lfu policy)
+    # lfu-log-factor: Higher = slower counter growth (default 10)
+    # lfu-decay-time: Minutes to halve counter when key not accessed (default 1)
+    lfu-log-factor 10
+    lfu-decay-time 1
+    
+    # LRU samples: More samples = more accurate but slower (default 5)
+    maxmemory-samples 10
+    
+    # ============================================
+    # LAZY FREEING (Background deletion)
+    # ============================================
+    # Delete expired keys in background (non-blocking)
+    lazyfree-lazy-eviction yes
+    lazyfree-lazy-expire yes
+    lazyfree-lazy-server-del yes
+    replica-lazy-flush yes
+    
+    # ============================================
+    # KEY EXPIRATION
+    # ============================================
+    # Active expiration: Check 20 keys per 100ms
+    hz 10
+    
+    # ============================================
+    # REPLICATION
+    # ============================================
+    replica-read-only yes
+    repl-diskless-sync yes
+    repl-diskless-sync-delay 5
+    
+    # ============================================
+    # PERFORMANCE
+    # ============================================
+    # Logging
+    loglevel notice
+    
+    # Timeout (0 = no timeout)
+    timeout 0
+    tcp-keepalive 300
+    
+    # TCP backlog
+    tcp-backlog 511
+    
+    # Client output buffer limits
+    client-output-buffer-limit normal 0 0 0
+    client-output-buffer-limit replica 256mb 64mb 60
+    client-output-buffer-limit pubsub 32mb 8mb 60
+    
+    # Slow log (queries taking more than 10ms)
+    slowlog-log-slower-than 10000
+    slowlog-max-len 128
+
+---
+# Redis Headless Service (for StatefulSet DNS)
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: b2b-data
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/component: cache
+spec:
+  type: ClusterIP
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis
+      protocol: TCP
+
+---
+# Redis ClusterIP Service (for client connections)
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-svc
+  namespace: b2b-data
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/component: cache
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis
+      protocol: TCP

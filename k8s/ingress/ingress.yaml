@@ -1,0 +1,174 @@
+# B2B Platform Ingress Configuration
+# Requirements: 3.2 - THE Orchestrator SHALL expose the API_Service through Service resources
+
+---
+# TLS Secret for HTTPS (placeholder - replace with actual certificate)
+apiVersion: v1
+kind: Secret
+metadata:
+  name: b2b-tls-secret
+  namespace: b2b-system
+  labels:
+    app.kubernetes.io/name: b2b-platform
+    app.kubernetes.io/component: ingress
+type: kubernetes.io/tls
+data:
+  # Placeholder TLS certificate and key (base64 encoded)
+  # In production, use cert-manager or external certificate management
+  tls.crt: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUMrekNDQWVPZ0F3SUJBZ0lKQUxETlVMTjFNVEF3TUEwR0NTcUdTSWIzRFFFQkN3VUFNQlF4RWpBUUJnTlYKQkFNTUNXeHZZMkZzYUc5emREQWVGdzB5TkRBeE1ERXdNREF3TURCYUZ3MHlOVEF4TURFd01EQXdNREJhTUJReApFakFRQmdOVkJBTU1DV3h2WTJGc2FHOXpkRENDQVNJd0RRWUpLb1pJaHZjTkFRRUJCUUFEZ2dFUEFEQ0NBUW9DCmdnRUJBTFBsYWNlSG9sZGVyQ2VydGlmaWNhdGVDb250ZW50Cg==
+  tls.key: LS0tLS1CRUdJTiBQUklWQVRFIEtFWS0tLS0tCk1JSUV2Z0lCQURBTkJna3Foa2lHOXcwQkFRRUZBQVNDQktnd2dnU2tBZ0VBQW9JQkFRQ3o1V25IaDZIV2h5WUcKUGxhY2Vob2xkZXJQcml2YXRlS2V5Q29udGVudAo=
+
+---
+# Main API Ingress
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: b2b-api-ingress
+  namespace: b2b-system
+  labels:
+    app.kubernetes.io/name: b2b-api
+    app.kubernetes.io/component: ingress
+    app.kubernetes.io/part-of: b2b-platform
+  annotations:
+    # NGINX Ingress Controller annotations
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    
+    # Rate limiting
+    nginx.ingress.kubernetes.io/limit-rps: "100"
+    nginx.ingress.kubernetes.io/limit-connections: "50"
+    
+    # Proxy settings
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "30"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "60"
+    
+    # CORS settings
+    nginx.ingress.kubernetes.io/enable-cors: "true"
+    nginx.ingress.kubernetes.io/cors-allow-methods: "GET, POST, PUT, DELETE, PATCH, OPTIONS"
+    nginx.ingress.kubernetes.io/cors-allow-headers: "DNT,X-CustomHeader,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Authorization,X-Correlation-Id"
+    nginx.ingress.kubernetes.io/cors-allow-credentials: "true"
+    
+    # Security headers
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      add_header X-Frame-Options "SAMEORIGIN" always;
+      add_header X-Content-Type-Options "nosniff" always;
+      add_header X-XSS-Protection "1; mode=block" always;
+      add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - api.b2b-platform.local
+        - "*.b2b-platform.local"
+      secretName: b2b-tls-secret
+  rules:
+    # Main API endpoint
+    - host: api.b2b-platform.local
+      http:
+        paths:
+          # API v1 routes
+          - path: /api/v1
+            pathType: Prefix
+            backend:
+              service:
+                name: b2b-api-svc
+                port:
+                  number: 80
+          # API v2 routes (future)
+          - path: /api/v2
+            pathType: Prefix
+            backend:
+              service:
+                name: b2b-api-svc
+                port:
+                  number: 80
+          # Health endpoints
+          - path: /health
+            pathType: Prefix
+            backend:
+              service:
+                name: b2b-api-svc
+                port:
+                  number: 80
+          # Metrics endpoint (should be restricted in production)
+          - path: /metrics
+            pathType: Exact
+            backend:
+              service:
+                name: b2b-api-svc
+                port:
+                  number: 80
+          # Swagger/OpenAPI
+          - path: /swagger
+            pathType: Prefix
+            backend:
+              service:
+                name: b2b-api-svc
+                port:
+                  number: 80
+    # Tenant-specific subdomain routing
+    - host: "*.b2b-platform.local"
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: b2b-api-svc
+                port:
+                  number: 80
+
+---
+# Hangfire Dashboard Ingress (restricted access)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: b2b-hangfire-ingress
+  namespace: b2b-system
+  labels:
+    app.kubernetes.io/name: b2b-worker
+    app.kubernetes.io/component: ingress
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    # Basic auth for Hangfire dashboard
+    nginx.ingress.kubernetes.io/auth-type: basic
+    nginx.ingress.kubernetes.io/auth-secret: hangfire-basic-auth
+    nginx.ingress.kubernetes.io/auth-realm: "Hangfire Dashboard - Authentication Required"
+    # IP whitelist (adjust for your network)
+    nginx.ingress.kubernetes.io/whitelist-source-range: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - hangfire.b2b-platform.local
+      secretName: b2b-tls-secret
+  rules:
+    - host: hangfire.b2b-platform.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: b2b-worker-svc
+                port:
+                  number: 80
+
+---
+# Basic Auth Secret for Hangfire (htpasswd format)
+# Generate with: htpasswd -nb admin password | base64
+apiVersion: v1
+kind: Secret
+metadata:
+  name: hangfire-basic-auth
+  namespace: b2b-system
+  labels:
+    app.kubernetes.io/name: b2b-worker
+type: Opaque
+data:
+  # admin:$apr1$placeholder (replace with actual htpasswd)
+  auth: YWRtaW46JGFwcjEkcGxhY2Vob2xkZXI=

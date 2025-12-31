@@ -1,0 +1,54 @@
+# Kustomization file for B2B Platform Kubernetes manifests
+# Use: kubectl apply -k k8s/
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+metadata:
+  name: b2b-platform
+
+# Common labels applied to all resources (metadata only, not selectors)
+labels:
+  - pairs:
+      app.kubernetes.io/managed-by: kustomize
+      app.kubernetes.io/part-of: b2b-platform
+    includeSelectors: false
+
+resources:
+  # Namespaces (apply first)
+  - namespaces/namespaces.yaml
+  
+  # Configuration
+  - config/configmap.yaml
+  - config/secrets.yaml
+  
+  # Data layer
+  - data/mssql.yaml
+  - data/mongodb.yaml
+  - data/redis.yaml
+  
+  # Messaging layer
+  - messaging/rabbitmq.yaml
+  
+  # Application layer
+  - api/deployment.yaml
+  - api/service.yaml
+  - api/hpa.yaml
+  - worker/deployment.yaml
+  
+  # Ingress
+  - ingress/ingress.yaml
+  
+  # Observability layer (ELK Stack)
+  - observability/elasticsearch.yaml
+  - observability/logstash.yaml
+  - observability/kibana.yaml
+  
+  # Observability layer (Prometheus/Grafana)
+  - observability/prometheus.yaml
+  - observability/grafana.yaml
+  - observability/alertmanager.yaml
+  - observability/servicemonitor.yaml
+  
+  # Observability layer (Tracing)
+  - observability/jaeger.yaml
